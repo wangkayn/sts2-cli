@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""
+Play a full STS2 run using the headless simulator with a random agent.
+"""
+
+import json
+import subprocess
+import sys
+import random
+import os
+
+DOTNET = os.path.expanduser("~/.dotnet-arm64/dotnet")
+PROJECT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "Sts2Headless", "Sts2Headless.csproj")
+
+
+def play_run(seed: str, character: str = "Ironclad", verbose: bool = True):
+    """Play a complete run and return the result."""
+    proc = subprocess.Popen(
+        [DOTNET, "run", "--no-build", "--project", PROJECT],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE if not verbose else None,
+        text=True,
+        bufsize=1,
+    )
+
+    def read_json_line() -> dict:
+        """Read a line from stdout, skipping non-JSON lines (build warnings etc.)"""
+        while True:
+            resp_line = proc.stdout.readline().strip()
+            if not resp_line:
+                raise RuntimeError("No response from simulator (EOF)")
+            if resp_line.startswith("{"):
+                return json.loads(resp_line)
+            # Skip non-JSON lines (build warnings, etc.)
+            if verbose:
+                print(f"  [skip] {resp_line[:120]}")
+
+    def send(cmd: dict) -> dict:
+        line = json.dumps(cmd)
+        if verbose:
+            print(f"  > {line[:200]}")
+        proc.stdin.write(line + "\n")
+        proc.stdin.flush()
+        resp = read_json_line()
+        if verbose:
+            rtype = resp.get("type", "?")
+            decision = resp.get("decision", "")
+            if rtype == "decision":
+                player = resp.get("player", {})
+                hp = player.get("hp", "?")
+                max_hp = player.get("max_hp", "?")
+                gold = player.get("gold", "?")
+                act = resp.get("act", "?")
+                floor = resp.get("floor", "?")
+                print(f"  < {rtype}/{decision} act={act} floor={floor} hp={hp}/{max_hp} gold={gold}")
+            else:
+                print(f"  < {json.dumps(resp)[:200]}")
+        return resp
+
+    try:
+        # Read ready message (may need to skip build warnings)
+        ready = read_json_line()
+        if ready.get("type") != "ready":
+            print(f"  Unexpected initial response: {ready}")
+            return {"victory": False, "seed": seed, "error": "bad_init"}
+        if verbose:
+            print(f"Connected: {ready}")
+
+        # Start run
+        state = send({"cmd": "start_run", "character": character, "seed": seed})
+
+        step = 0
+        max_steps = 2000  # Safety limit
+
+        while step < max_steps:
+            step += 1
+
+            if state.get("type") == "error":
+                print(f"  ERROR: {state.get('message', 'unknown')}")
+                break
+
+            decision = state.get("decision", "")
+
+            if decision == "game_over":
+                victory = state.get("victory", False)
+                player = state.get("player", {})
+                print(f"\n{'VICTORY' if victory else 'DEFEAT'} at act {state.get('act')}, "
+                      f"floor {state.get('floor')} "
+                      f"(HP: {player.get('hp')}/{player.get('max_hp')}, "
+                      f"Gold: {player.get('gold')}, "
+                      f"Deck: {player.get('deck_size')} cards)")
+                return {
+                    "victory": victory,
+                    "seed": seed,
+                    "steps": step,
+                    "act": state.get("act"),
+                    "floor": state.get("floor"),
+                    "hp": player.get("hp"),
+                    "max_hp": player.get("max_hp"),
+                }
+
+            elif decision == "map_select":
+                choices = state.get("choices", [])
+                if not choices:
+                    print("  No map choices available!")
+                    break
+                # Random selection
+                choice = random.choice(choices)
+                state = send({
+                    "cmd": "action",
+                    "action": "select_map_node",
+                    "args": {"col": choice["col"], "row": choice["row"]}
+                })
+
+            elif decision == "combat_play":
+                hand = state.get("hand", [])
+                energy = state.get("energy", 0)
+                enemies = state.get("enemies", [])
+
+                # Simple strategy: play playable cards until out of energy
+                playable = [c for c in hand if c.get("can_play", False)
+                           and (c.get("cost", 0) <= energy)]
+
+                if playable:
+                    card = playable[0]
+                    args = {"card_index": card["index"]}
+                    # If card needs a target, pick first enemy
+                    if card.get("target_type") == "AnyEnemy" and enemies:
+                        args["target_index"] = 0
+                    state = send({
+                        "cmd": "action",
+                        "action": "play_card",
+                        "args": args
+                    })
+                else:
+                    # End turn - retry a few times if we get "Not in play phase"
+                    for retry in range(5):
+                        state = send({
+                            "cmd": "action",
+                            "action": "end_turn"
+                        })
+                        if state.get("type") != "error":
+                            break
+                        import time
+                        time.sleep(0.5)
+                    if state.get("type") == "error":
+                        # Try proceeding instead
+                        state = send({"cmd": "action", "action": "proceed"})
+
+            elif decision == "event_choice":
+                options = state.get("options", [])
+                if options:
+                    choice = options[0]
+                    state = send({
+                        "cmd": "action",
+                        "action": "choose_option",
+                        "args": {"option_index": choice["index"]}
+                    })
+                else:
+                    # No options (localization missing), skip event
+                    state = send({
+                        "cmd": "action",
+                        "action": "leave_room"
+                    })
+
+            elif decision == "rest_site":
+                options = state.get("options", [])
+                if options:
+                    state = send({
+                        "cmd": "action",
+                        "action": "choose_option",
+                        "args": {"option_index": 0}
+                    })
+                else:
+                    state = send({"cmd": "action", "action": "leave_room"})
+
+            elif decision in ("card_reward", "shop", "treasure"):
+                state = send({"cmd": "action", "action": "proceed"})
+
+            elif decision == "unknown":
+                print(f"  Unknown decision point: {state}")
+                state = send({"cmd": "action", "action": "proceed"})
+
+            else:
+                print(f"  Unhandled decision: {decision}")
+                state = send({"cmd": "action", "action": "proceed"})
+
+        print(f"  Reached max steps ({max_steps})")
+        return {"victory": False, "seed": seed, "steps": step, "timeout": True}
+
+    except Exception as e:
+        print(f"  EXCEPTION: {e}")
+        return {"victory": False, "seed": seed, "steps": step, "error": str(e)}
+
+    finally:
+        try:
+            proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
+            proc.stdin.flush()
+        except:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except:
+            proc.kill()
+
+
+def main():
+    num_runs = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+    character = sys.argv[2] if len(sys.argv) > 2 else "Ironclad"
+
+    print(f"Playing {num_runs} runs as {character}")
+    print("=" * 60)
+
+    results = []
+    for i in range(num_runs):
+        seed = f"run_{i+1}"
+        print(f"\n--- Run {i+1}/{num_runs} (seed: {seed}) ---")
+        result = play_run(seed, character, verbose=True)
+        results.append(result)
+        print()
+
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    wins = sum(1 for r in results if r and r.get("victory"))
+    completed = sum(1 for r in results if r and not r.get("timeout"))
+    for i, r in enumerate(results):
+        if r:
+            status = "WIN" if r.get("victory") else ("TIMEOUT" if r.get("timeout") else "LOSS")
+            print(f"  Run {i+1}: {status} | seed={r.get('seed')} steps={r.get('steps')} "
+                  f"act={r.get('act')} floor={r.get('floor')}")
+    print(f"\nWins: {wins}/{num_runs}, Completed: {completed}/{num_runs}")
+
+
+if __name__ == "__main__":
+    main()

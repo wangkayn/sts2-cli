@@ -1,0 +1,11 @@
+decompiled/
+lib/
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.DotSettings
+/python/__pycache__/
+*.pyc

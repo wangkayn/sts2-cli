@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="GodotStubs/GodotStubs.csproj" />
+  <Project Path="Sts2Core/Sts2Core.csproj" />
+  <Project Path="Sts2Headless/Sts2Headless.csproj" />
+</Solution>

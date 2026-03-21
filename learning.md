@@ -94,3 +94,16 @@
 - Golden Pearl (+150 gold) was selected and applied
 - 3 options shown correctly from Neow event
 - Avg floor improved from 8.4 to 9.2 with Neow
+
+## Game run_369 Analysis (Floor 17 BOSS defeat!)
+- REACHED ACT 1 BOSS: Kin Priest 190hp + 2x Kin Follower 59+58hp = 307hp total
+- Boss fight lasted 9 rounds before death (HP 49→0)
+- Had Inflame in deck but might not have drawn it during boss
+- Had Power Potion but didn't use it (should use at boss fight start!)
+- Had Attack Potion and used it ✅ 
+- Deck: 19 cards with Thunderclap, Headbutt, Inflame, Hemokinesis, Shrug It Off
+- Relics: Burning Blood, Lead Paperweight, Red Skull, Pendulum
+- Key insight: need MORE HP entering boss (49/80 not enough)
+- Key insight: need damage amplification EARLIER (Inflame turn 1)
+- Key insight: kill Kin Followers first (59+58hp) to reduce incoming damage
+- Almost won! 20 more HP or 1 more damage card would've done it

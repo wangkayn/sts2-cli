@@ -64,3 +64,17 @@
 - [ ] Better card pick strategy (synergy-based)
 - [ ] Shop buying strategy (cheap relics/potions)
 - [ ] Try to beat Act 1 Boss
+
+## Game claude_v2 Analysis (Floor 7 defeat)
+- Intents work perfectly — can see exact damage values
+- Fairy in a Bottle relic saved from death once (HP 5→24)
+- Had 3 potions (Vulnerable, Orobic Acid, Fairy) but never used any!
+- Byrdonis Elite 92hp with 17-24 dmg/turn killed us
+- Gold 180 never spent on shop
+- Key lesson: USE POTIONS in tough fights, especially Vulnerable Potion (+50% dmg)
+- Key lesson: buy from shop when gold > 100
+- Key lesson: Bash → Vulnerable → big attacks is the winning pattern
+
+## Bug Found
+- Potion usage code exists but agent never triggers it
+- Need to add potion usage to combat strategy

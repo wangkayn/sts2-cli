@@ -212,8 +212,16 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True):
                 else:
                     state = send({"cmd": "action", "action": "skip_card_reward"})
 
+            elif decision == "card_select":
+                # Auto-select first card
+                cards = state.get("cards", [])
+                if cards:
+                    state = send({"cmd": "action", "action": "select_cards",
+                                 "args": {"indices": "0"}})
+                else:
+                    state = send({"cmd": "action", "action": "skip_select"})
+
             elif decision == "shop":
-                # Simple shop strategy: just leave (random agent doesn't shop)
                 state = send({"cmd": "action", "action": "leave_room"})
 
             elif decision == "unknown":

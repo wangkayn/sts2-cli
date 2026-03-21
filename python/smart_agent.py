@@ -284,6 +284,13 @@ def play_game(seed, verbose=True):
                 else:
                     state = send({"cmd": "action", "action": "leave_room"})
 
+            elif dec == "card_select":
+                cards = state.get("cards", [])
+                if cards:
+                    state = send({"cmd": "action", "action": "select_cards", "args": {"indices": "0"}})
+                else:
+                    state = send({"cmd": "action", "action": "skip_select"})
+
             elif dec == "shop":
                 # BUY STRATEGY: buy one relic or potion, then leave
                 relics_list = state.get("relics", [])

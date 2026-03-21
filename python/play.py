@@ -301,29 +301,22 @@ def loc_resolve(key):
     cache = _load_loc()
     # Try direct lookup in relevant tables
     for table in ['events', 'relics', 'ancients', 'cards', 'potions', 'monsters']:
-        val = cache.get(f"{table}:{key}")
-        if val:
-            zh = cache.get(f"{table}:{key}:zh", "")
-            if zh and zh != val:
-                return f"{val}({zh})"
-            return val
+        val_en = cache.get(f"{table}:{key}")
+        val_zh = cache.get(f"{table}:{key}:zh")
+        if val_en:
+            return n({"en": val_en, "zh": val_zh}) if val_zh else val_en
     # Extract meaningful part from key
-    # e.g. "NEOW.pages.INITIAL.options.PRECISE_SCISSORS.title" → "PRECISE_SCISSORS"
     parts = key.split('.')
     for p in reversed(parts):
         if p not in ('title', 'description', 'options', 'pages', 'INITIAL'):
-            # Look up as relic name
-            relic_name = cache.get(f"relics:{p}.title")
-            relic_desc = cache.get(f"relics:{p}.description", "")
-            if relic_name:
-                zh = cache.get(f"relics:{p}.title:zh", "")
-                d = desc({"en": relic_desc})
-                result = f"{relic_name}"
-                if zh and zh != relic_name:
-                    result += f"({zh})"
-                if d:
-                    result += f" — {c(d, 'dim')}"
-                return result
+            relic_en = cache.get(f"relics:{p}.title")
+            relic_zh = cache.get(f"relics:{p}.title:zh")
+            desc_en = cache.get(f"relics:{p}.description", "")
+            desc_zh = cache.get(f"relics:{p}.description:zh", "")
+            if relic_en:
+                name = n({"en": relic_en, "zh": relic_zh})
+                d = desc({"en": desc_en, "zh": desc_zh})
+                return f"{name}" + (f" — {c(d, 'dim')}" if d else "")
             return p.replace('_', ' ').title()
     return key
 
@@ -627,6 +620,38 @@ def play(character="Ironclad", seed=None, auto=False):
                 else:
                     state = send({"cmd": "action", "action": "select_card_reward",
                                  "args": {"card_index": int(choice)}})
+
+            elif dec == "card_select":
+                # Card selection prompt (upgrade, remove, transform, bundle pick)
+                print(f"\n{'─' * 60}")
+                ctx = state.get("context", {})
+                if ctx:
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} Floor {ctx.get('floor','?')}")
+                min_sel = state.get("min_select", 1)
+                max_sel = state.get("max_select", 1)
+                print(f"  {c('Choose cards', 'bold')} (select {min_sel}-{max_sel})")
+                show_player(state.get("player", {}))
+                print()
+                cards = state.get("cards", [])
+                for cd in cards:
+                    up = c("⬆", "green") if cd.get("upgraded") else ""
+                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(cd.get('type',''), 'dim')}")
+
+                valid = {str(cd["index"]): cd for cd in cards}
+                if min_sel == 0:
+                    valid["s"] = None
+
+                if auto:
+                    choice = "0"
+                else:
+                    choice = get_input(f"Choose card(s) [index] or (s)kip", set(valid.keys()), state=state)
+
+                if choice == "s":
+                    state = send({"cmd": "action", "action": "skip_select"})
+                else:
+                    # Support comma-separated indices
+                    state = send({"cmd": "action", "action": "select_cards",
+                                 "args": {"indices": choice}})
 
             elif dec == "shop":
                 show_shop(state)

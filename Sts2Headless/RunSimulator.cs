@@ -166,6 +166,7 @@ public class RunSimulator
     private List<Reward>? _pendingRewards;
     private CardReward? _pendingCardReward;
     private bool _rewardsProcessed;
+    private readonly HeadlessCardSelector _cardSelector = new();
 
     public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null)
     {
@@ -215,9 +216,8 @@ public class RunSimulator
             RunManager.Instance.EnterAct(0, doTransition: false).GetAwaiter().GetResult();
             Log("Entered Act 0");
 
-            // Register headless card selector for cards that need player choice
-            // (e.g. Headbutt — pick a card from discard to put on top of draw)
-            CardSelectCmd.UseSelector(new HeadlessCardSelector());
+            // Register card selector for cards that need player choice
+            CardSelectCmd.UseSelector(_cardSelector);
 
             // Now we should be at the map — detect decision point
             return DetectDecisionPoint();
@@ -259,6 +259,10 @@ public class RunSimulator
                     return DoBuyPotion(player, args);
                 case "remove_card":
                     return DoRemoveCard(player);
+                case "select_cards":
+                    return DoSelectCards(player, args);
+                case "skip_select":
+                    return DoSkipSelect(player);
                 case "use_potion":
                     return DoUsePotion(player, args);
                 case "discard_potion":
@@ -577,6 +581,38 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    private Dictionary<string, object?> DoSelectCards(Player player, Dictionary<string, object?>? args)
+    {
+        if (!_cardSelector.HasPending)
+            return Error("No pending card selection");
+        if (args == null || !args.ContainsKey("indices"))
+            return Error("select_cards requires 'indices' (comma-separated card indices)");
+
+        var indicesStr = args["indices"]?.ToString() ?? "";
+        var indices = indicesStr.Split(',')
+            .Select(s => int.TryParse(s.Trim(), out var v) ? v : -1)
+            .Where(i => i >= 0)
+            .ToArray();
+
+        Log($"Card selection: indices [{string.Join(",", indices)}]");
+        _cardSelector.ResolvePendingByIndices(indices);
+        _syncCtx.Pump();
+        WaitForActionExecutor();
+        return DetectDecisionPoint();
+    }
+
+    private Dictionary<string, object?> DoSkipSelect(Player player)
+    {
+        if (_cardSelector.HasPending)
+        {
+            Log("Skipping card selection");
+            _cardSelector.CancelPending();
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+        }
+        return DetectDecisionPoint();
+    }
+
     private Dictionary<string, object?> DoUsePotion(Player player, Dictionary<string, object?>? args)
     {
         if (args == null || !args.ContainsKey("potion_index"))
@@ -678,16 +714,30 @@ public class RunSimulator
             Log($"Rest site: choosing option {optionIndex}");
             try
             {
-                RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex).GetAwaiter().GetResult();
+                // Run on background thread so Smith card selection can pause
+                var task = Task.Run(() => RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex));
+                for (int i = 0; i < 100; i++)
+                {
+                    _syncCtx.Pump();
+                    if (_cardSelector.HasPending) break;
+                    if (task.IsCompleted) break;
+                    Thread.Sleep(10);
+                }
+                if (_cardSelector.HasPending)
+                {
+                    WaitForActionExecutor();
+                    return DetectDecisionPoint();
+                }
+                if (!task.IsCompleted) task.Wait(2000);
                 _syncCtx.Pump();
             }
             catch (Exception ex)
             {
                 Log($"Rest site ChooseLocalOption failed: {ex.Message}");
             }
-            // Don't ForceToMap here — let DetectDecisionPoint handle it.
         }
         // For events — use EventSynchronizer
+        // Run Chosen() on a background thread so card selections can pause
         else if (_runState?.CurrentRoom is EventRoom)
         {
             var eventSync = RunManager.Instance.EventSynchronizer;
@@ -700,18 +750,33 @@ public class RunSimulator
                 {
                     try
                     {
-                        options[optionIndex].Chosen().GetAwaiter().GetResult();
+                        // Run on thread pool so GetSelectedCards can block
+                        var task = Task.Run(() => options[optionIndex].Chosen());
+                        // Wait briefly, but if card selection is pending, return early
+                        for (int i = 0; i < 100; i++)
+                        {
+                            _syncCtx.Pump();
+                            if (_cardSelector.HasPending) break;
+                            if (task.IsCompleted) break;
+                            Thread.Sleep(10);
+                        }
+                        if (_cardSelector.HasPending)
+                        {
+                            // Card selection needed — return to main loop
+                            // DetectDecisionPoint will see the pending and return card_select
+                            WaitForActionExecutor();
+                            return DetectDecisionPoint();
+                        }
+                        if (!task.IsCompleted) task.Wait(2000);
                         _syncCtx.Pump();
                     }
                     catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
                 }
 
-                // If event didn't advance (same options count, not finished),
-                // force-finish it to prevent infinite loop
                 var optCountAfter = localEvent.CurrentOptions?.Count ?? 0;
                 if (!localEvent.IsFinished && optCountAfter == optCountBefore && optCountAfter > 0)
                 {
-                    Log($"Event {localEvent.GetType().Name} didn't advance after choose, force-finishing");
+                    Log($"Event {localEvent.GetType().Name} didn't advance, force-finishing");
                     ForceToMap();
                 }
             }
@@ -776,6 +841,31 @@ public class RunSimulator
         if (player.Creature != null && player.Creature.IsDead)
         {
             return GameOverState(false);
+        }
+
+        // Check if there's a pending card selection (upgrade, remove, transform, bundle)
+        if (_cardSelector.HasPending && _cardSelector.PendingOptions != null)
+        {
+            var opts = _cardSelector.PendingOptions.Select((card, i) => new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = card.Id.ToString(),
+                ["name"] = _loc.Card(card.Id.Entry),
+                ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
+                ["type"] = card.Type.ToString(),
+                ["upgraded"] = card.IsUpgraded,
+            }).ToList();
+
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "card_select",
+                ["context"] = RunContext(),
+                ["cards"] = opts,
+                ["min_select"] = _cardSelector.PendingMinSelect,
+                ["max_select"] = _cardSelector.PendingMaxSelect,
+                ["player"] = PlayerSummary(player),
+            };
         }
 
         // Check if there's a pending card reward
@@ -1537,21 +1627,75 @@ public class RunSimulator
     /// Card selector for headless mode — picks first available card for any selection prompt.
     /// Used by cards like Headbutt, Armaments, etc. that need player to choose a card.
     /// </summary>
+    /// <summary>
+    /// Card selector that creates a pending selection decision point.
+    /// When the game needs the player to choose cards (upgrade, remove, transform, bundle pick),
+    /// this stores the options and waits for the main loop to provide the answer.
+    /// </summary>
     internal class HeadlessCardSelector : MegaCrit.Sts2.Core.TestSupport.ICardSelector
     {
+        // Pending card selection — set by game engine, read by main loop
+        public List<CardModel>? PendingOptions { get; private set; }
+        public int PendingMinSelect { get; private set; }
+        public int PendingMaxSelect { get; private set; }
+        public string PendingPrompt { get; private set; } = "";
+        private TaskCompletionSource<IEnumerable<CardModel>>? _pendingTcs;
+
+        public bool HasPending => _pendingTcs != null && !_pendingTcs.Task.IsCompleted;
+
         public Task<IEnumerable<CardModel>> GetSelectedCards(
             IEnumerable<CardModel> options, int minSelect, int maxSelect)
         {
-            // Pick first N cards
-            var selected = options.Take(maxSelect);
-            return Task.FromResult(selected);
+            var optList = options.ToList();
+            if (optList.Count == 0)
+                return Task.FromResult<IEnumerable<CardModel>>(Array.Empty<CardModel>());
+
+            // If only one option and minSelect requires it, auto-select
+            if (optList.Count == 1 && minSelect >= 1)
+                return Task.FromResult<IEnumerable<CardModel>>(optList);
+
+            // Store pending selection and wait
+            PendingOptions = optList;
+            PendingMinSelect = minSelect;
+            PendingMaxSelect = maxSelect;
+            _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
+
+            Console.Error.WriteLine($"[SIM] Card selection pending: {optList.Count} options, select {minSelect}-{maxSelect}");
+
+            // Return the task — the main loop will complete it
+            return _pendingTcs.Task;
+        }
+
+        public void ResolvePending(IEnumerable<CardModel> selected)
+        {
+            _pendingTcs?.TrySetResult(selected);
+            PendingOptions = null;
+            _pendingTcs = null;
+        }
+
+        public void ResolvePendingByIndices(int[] indices)
+        {
+            if (PendingOptions == null) return;
+            var selected = indices
+                .Where(i => i >= 0 && i < PendingOptions.Count)
+                .Select(i => PendingOptions[i])
+                .ToList();
+            ResolvePending(selected);
+        }
+
+        public void CancelPending()
+        {
+            _pendingTcs?.TrySetResult(Array.Empty<CardModel>());
+            PendingOptions = null;
+            _pendingTcs = null;
         }
 
         public CardModel? GetSelectedCardReward(
             IReadOnlyList<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> options,
             IReadOnlyList<CardRewardAlternative> alternatives)
         {
-            // Pick first card
+            // This is for the TestMode auto-select path (card rewards)
+            // We handle card rewards separately via card_reward decision
             return options.Count > 0 ? options[0].Card : null;
         }
     }

@@ -6,7 +6,7 @@ Runs the real game engine (sts2.dll) headless — no GPU, no UI, no Godot. All d
 
 [中文文档](README_zh.md)
 
-![demo](docs/demo.gif)
+![demo](docs/demo_en.gif)
 
 ## Setup
 

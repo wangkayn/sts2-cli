@@ -16,7 +16,7 @@ os.environ["STS2_GAME_DIR"] = os.path.expanduser(
 )
 
 import play as P
-P.LANG = "zh"
+P.LANG = sys.argv[1] if len(sys.argv) > 1 else "zh"
 
 DOTNET = P.DOTNET or os.path.expanduser("~/.dotnet-arm64/dotnet")
 PROJECT = P.PROJECT

@@ -4,7 +4,7 @@
 
 通过反编译游戏 DLL + stub Godot 运行时，实现了无 GPU、无 UI 的完整游戏模拟。所有伤害计算、卡牌效果、敌人AI、遗物触发、随机数都和真实游戏一致。
 
-![demo](docs/demo.gif)
+![demo](docs/demo_zh.gif)
 
 ## 安装
 

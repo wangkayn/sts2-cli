@@ -48,6 +48,15 @@ python3 python/smart_agent.py 100   # 跑 100 局
   商店:    c0 买卡 / r0 买遗物 / p0 买药水 / rm 移除 / leave 离开
 ```
 
+## 角色支持
+
+| 角色 | 状态 |
+|---|---|
+| 铁甲战士 (Ironclad) | ✅ 已测试 |
+| 沉默猎手 (Silent) | 🚧 开发中 |
+| 故障机器人 (Defect) | 🚧 开发中 |
+| 摄政王 (Regent) | 🚧 开发中 |
+
 ## JSON 协议
 
 除了交互模式，也可以通过 stdin/stdout JSON 协议编程控制（写 AI agent、RL 训练等）：

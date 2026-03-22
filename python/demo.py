@@ -149,7 +149,7 @@ try:
             pause()
             opts = [o for o in state.get("options", []) if o.get("is_enabled")]
             if opts:
-                print(f"\n{P.c('>', 'green')} 选择: {P.c(str(opts[0]['index']), 'yellow')}")
+                print(f"\n{P.c('>', 'green')} {P.t('Choose:','选择:')} {P.c(str(opts[0]['index']), 'yellow')}")
                 pause()
                 state = send({"cmd": "action", "action": "choose_option",
                              "args": {"option_index": opts[0]["index"]}})
@@ -171,14 +171,14 @@ try:
         elif dec == "shop":
             P.show_shop(state)
             pause()
-            print(f"\n{P.c('>', 'green')} leave")
+            print(f"\n{P.c('>', 'green')} {P.t('leave','离开')}")
             pause()
             state = send({"cmd": "action", "action": "leave_room"})
 
         else:
             state = send({"cmd": "action", "action": "proceed"})
 
-    print(f"\n{P.c('— Demo End —', 'dim')}")
+    print(f"\n{P.c(P.t('— Demo End —','— 演示结束 —'), 'dim')}")
 
 finally:
     try:

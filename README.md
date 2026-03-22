@@ -69,6 +69,15 @@ dotnet run --project Sts2Headless/Sts2Headless.csproj
 
 Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are bilingual (en/zh).
 
+## Supported Characters
+
+| Character | Status |
+|---|---|
+| Ironclad | ✅ Fully tested |
+| Silent | 🚧 In progress |
+| Defect | 🚧 In progress |
+| Regent | 🚧 In progress |
+
 ## Architecture
 
 ```

@@ -290,7 +290,7 @@ def show_player(p, show_deck=False):
     if show_deck:
         cards = p.get("deck", [])
         if cards:
-            print(f"  {c('Deck:', 'bold')}")
+            print(f"  {c(t('Deck:','牌组:'), 'bold')}")
             for cd in cards:
                 up = c("⬆", "green") if cd.get("upgraded") else ""
                 print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(cd.get('type',''), 'dim')}")
@@ -426,7 +426,7 @@ def show_map(state, send_fn=None):
     act_name = n(ctx.get("act_name", "?"))
     floor = ctx.get("floor", "?")
     print(f"\n{'═' * 60}")
-    print(f"  {c(f'{act_name}', 'bold')} Floor {floor}")
+    print(f"  {c(f'{act_name}', 'bold')} {t('Floor','层')} {floor}")
     show_player(state.get("player", {}))
     print()
     type_icons = {
@@ -529,7 +529,7 @@ def show_rest_site(state):
     print(f"\n{'─' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} Floor {ctx.get('floor','?')}")
+        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
     print(f"  {c(t('Rest Site','休息处'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -598,7 +598,7 @@ def show_event(state):
     if ctx:
         act = n(ctx.get("act_name", "?"))
         floor = ctx.get("floor", "?")
-        print(f"  {c(act, 'dim')} Floor {floor}")
+        print(f"  {c(act, 'dim')} {t('Floor','层')} {floor}")
     print(f"  {c(f'Event: {event_name}', 'bold')}")
     if event_desc:
         resolved = loc_resolve(event_desc) if event_desc.isupper() or '.' in event_desc else event_desc
@@ -657,7 +657,7 @@ def _render_map(map_data, choice_set=None):
 
     width = W * total_cols + 6
     print(f"\n{'═' * width}")
-    print(f"  {c(act, 'bold')} — Floor {floor_n}")
+    print(f"  {c(act, 'bold')} — {t('Floor','层')} {floor_n}")
     print()
 
     # Boss row
@@ -770,7 +770,7 @@ def get_input(prompt, valid_options=None, state=None):
         try:
             raw = input(f"\n{c('>', 'green')} {prompt}: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            print("\nQuitting...")
+            print(f"\n{t('Quitting...','退出...')}")
             sys.exit(0)
 
         if not raw:
@@ -778,22 +778,41 @@ def get_input(prompt, valid_options=None, state=None):
 
         # Meta-commands available at any prompt
         if raw == "help":
-            print(f"""
+            if LANG == "zh":
+                print(f"""
+  {c('命令:', 'bold')}
+    {c('help', 'cyan')}     — 帮助
+    {c('map', 'cyan')}      — 显示地图
+    {c('deck', 'cyan')}     — 查看牌组
+    {c('potions', 'cyan')}  — 查看药水
+    {c('relics', 'cyan')}   — 查看遗物
+    {c('quit', 'cyan')}     — 退出
+
+  {c('操作:', 'bold')}
+    地图:    输入路径编号 (0, 1, 2)
+    战斗:    卡牌编号 / {c('e', 'yellow')} 结束回合 / {c('p0', 'yellow')} 使用药水
+    奖励:    卡牌编号 / {c('s', 'yellow')} 跳过
+    休息:    选项编号
+    事件:    选项编号 / {c('leave', 'yellow')} 离开
+    商店:    {c('c0', 'yellow')} 买卡 / {c('r0', 'yellow')} 遗物 / {c('p0', 'yellow')} 药水 / {c('rm', 'yellow')} 移除 / {c('leave', 'yellow')} 离开
+""")
+            else:
+                print(f"""
   {c('Commands:', 'bold')}
     {c('help', 'cyan')}     — show this help
-    {c('map', 'cyan')}      — show current map choices
-    {c('deck', 'cyan')}     — show full deck
+    {c('map', 'cyan')}      — show map
+    {c('deck', 'cyan')}     — show deck
     {c('potions', 'cyan')}  — show potions
-    {c('relics', 'cyan')}   — show relics with descriptions
-    {c('quit', 'cyan')}     — quit the game
+    {c('relics', 'cyan')}   — show relics
+    {c('quit', 'cyan')}     — quit
 
-  {c('Decision-specific:', 'bold')}
-    Map:     enter {c('path number', 'yellow')} (e.g. 0, 1, 2)
-    Combat:  enter {c('card index', 'yellow')} or {c('e', 'yellow')} (end turn) or {c('p0', 'yellow')} (use potion 0)
-    Reward:  enter {c('card index', 'yellow')} or {c('s', 'yellow')} (skip)
-    Rest:    enter {c('option index', 'yellow')}
-    Event:   enter {c('option index', 'yellow')} or {c('leave', 'yellow')}
-    Shop:    enter {c('c0', 'yellow')} (buy card) / {c('r0', 'yellow')} (relic) / {c('p0', 'yellow')} (potion) / {c('rm', 'yellow')} (remove) / {c('leave', 'yellow')}
+  {c('Actions:', 'bold')}
+    Map:     path number (0, 1, 2)
+    Combat:  card index / {c('e', 'yellow')} end turn / {c('p0', 'yellow')} use potion
+    Reward:  card index / {c('s', 'yellow')} skip
+    Rest:    option index
+    Event:   option index / {c('leave', 'yellow')} leave
+    Shop:    {c('c0', 'yellow')} card / {c('r0', 'yellow')} relic / {c('p0', 'yellow')} potion / {c('rm', 'yellow')} remove / {c('leave', 'yellow')} leave
 """)
             continue
         if raw == "deck" and state:
@@ -807,7 +826,7 @@ def get_input(prompt, valid_options=None, state=None):
                 for pot in pots:
                     if pot: print(f"  🧪 {potion_str(pot)}")
             else:
-                print("  No potions.")
+                print(f"  {t('No potions.','没有药水。')}")
             continue
         if raw == "relics" and state:
             p = state.get("player", {})
@@ -827,11 +846,11 @@ def get_input(prompt, valid_options=None, state=None):
                 print(f"  {c(n(ctx.get('act_name','?')), 'bold')} Floor {ctx.get('floor','?')}")
             continue
         if raw == "quit":
-            print("Quitting...")
+            print(t("Quitting...","退出..."))
             sys.exit(0)
 
         if valid_options and raw not in valid_options:
-            print(f"  Invalid. Options: {', '.join(sorted(valid_options))}")
+            print(f"  {t('Invalid. Options:','无效。选项:')} {', '.join(sorted(valid_options))}")
             continue
         return raw
 
@@ -867,18 +886,18 @@ def play(character="Ironclad", seed=None, auto=False):
             return
 
         print(f"\n{c('Slay the Spire 2 — Headless CLI', 'bold')}")
-        print(f"Character: {character}  Seed: {seed or 'random'}")
-        print(f"Type {c('help', 'cyan')} at any prompt for available commands.\n")
+        print(f"{t('Character','角色')}: {character}  {t('Seed','种子')}: {seed or t('random','随机')}")
+        print(f"{t('Type','输入')} {c('help', 'cyan')} {t('for available commands.','查看可用命令。')}\n")
 
         state = send({"cmd": "start_run", "character": character, "seed": seed or f"cli_{random.randint(1000,9999)}"})
 
         while True:
             if not state:
-                print("Connection lost.")
+                print(t("Connection lost.","连接已断开。"))
                 break
 
             if state.get("type") == "error":
-                print(f"  {c('Error:', 'red')} {state.get('message', '?')}")
+                print(f"  {c(t('Error:','错误:'), 'red')} {state.get('message', '?')}")
                 state = send({"cmd": "action", "action": "proceed"})
                 continue
 
@@ -891,7 +910,7 @@ def play(character="Ironclad", seed=None, auto=False):
                 if victory:
                     print(f"  {c(t('VICTORY!','胜利!'), 'green')}")
                 else:
-                    print(f"  {c(t('DEFEAT','战败'), 'red')} Act {state.get('act')}, Floor {state.get('floor')}")
+                    print(f"  {c(t('DEFEAT','战败'), 'red')} Act {state.get('act')}, {t('Floor','层')} {state.get('floor')}")
                 show_player(p)
                 print(f"{'═' * 60}")
                 break
@@ -994,8 +1013,8 @@ def play(character="Ironclad", seed=None, auto=False):
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} Floor {ctx.get('floor','?')}")
-                print(f"  {c('Choose a card pack', 'bold')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                print(f"  {c(t('Choose a card pack','选择一个卡牌包'), 'bold')}")
                 show_player(state.get("player", {}))
                 print()
                 bundles = state.get("bundles", [])
@@ -1019,7 +1038,7 @@ def play(character="Ironclad", seed=None, auto=False):
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} Floor {ctx.get('floor','?')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
                 print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} ({t('select','选择')} {min_sel}-{max_sel})")
@@ -1134,19 +1153,19 @@ def play(character="Ironclad", seed=None, auto=False):
                     new_gold = new_p.get("gold", 0)
                     changes = []
                     if gained_relics:
-                        changes.append(f"Gained relic: {', '.join(gained_relics)}")
+                        changes.append(f"{t('Relic','遗物')}: {', '.join(gained_relics)}")
                     if new_deck != old_deck:
-                        changes.append(f"Deck: {old_deck} → {new_deck}")
+                        changes.append(f"{t('Deck','牌组')}: {old_deck} → {new_deck}")
                     if new_hp != old_hp:
                         changes.append(f"HP: {old_hp} → {new_hp}")
                     if new_gold != old_gold:
                         diff = new_gold - old_gold
-                        changes.append(f"Gold: {old_gold} → {new_gold} ({'+' if diff > 0 else ''}{diff})")
+                        changes.append(f"{t('Gold','金')}: {old_gold} → {new_gold} ({'+' if diff > 0 else ''}{diff})")
                     if changes:
-                        print(f"\n  {c('Changes:', 'yellow')} {'; '.join(changes)}")
+                        print(f"\n  {c(t('Changes:','变化:'), 'yellow')} {'; '.join(changes)}")
 
             else:
-                print(f"  Unknown state: {dec}")
+                print(f"  {t('Unknown state:','未知状态:')} {dec}")
                 state = send({"cmd": "action", "action": "proceed"})
 
     finally:

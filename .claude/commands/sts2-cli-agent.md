@@ -7,7 +7,7 @@ Play one complete game of Slay the Spire 2 as a single character. The main agent
 ## Architecture
 
 ```
-Game Process ←→ sts2_bridge.py (local HTTP, port 9876) ←→ Main Agent (curl + reasoning)
+Game Process ←→ sts2_bridge.py (local HTTP, random port) ←→ Main Agent (curl + reasoning)
 ```
 
 YOU are the player. Each game decision = one curl command → read JSON → reason → next curl.
@@ -20,23 +20,24 @@ YOU are the player. Each game decision = one curl command → read JSON → reas
 2. **Read learning files** (silently absorb, don't repeat):
    - `agent/learning_general_en.md` (or `_cn.md` if user writes in Chinese)
    - `agent/learning_<character>_en.md` (or `_cn.md`)
-3. **Start bridge** (always use `--log` for bug reproduction):
+3. **Start bridge** (use a random port to avoid conflicts with other sessions):
    ```bash
-   lsof -ti:9876 | xargs kill 2>/dev/null; sleep 1
-   cd /Users/haowu/Workspace/sts2-cli && python3 agent/sts2_bridge.py 9876 --compact --log /tmp/sts2_game.jsonl &
+   STS2_PORT=$(python3 -c "import random; print(random.randint(19000,19999))")
+   STS2_LOG="/tmp/sts2_game_${STS2_PORT}.jsonl"
+   cd /Users/haowu/Workspace/sts2-cli && python3 agent/sts2_bridge.py $STS2_PORT --compact --log $STS2_LOG &
    ```
-   Wait 6 seconds for startup.
+   Wait 6 seconds for startup. Use `$STS2_PORT` in all subsequent curl commands.
 
    To replay a logged game to a specific step (for bug reproduction):
    ```bash
-   python3 agent/sts2_bridge.py replay /tmp/sts2_game.jsonl --until 42 --port 9876
+   python3 agent/sts2_bridge.py replay $STS2_LOG --until 42 --port $STS2_PORT
    ```
 
 ## Playing the Game
 
 ### Start run
 ```bash
-curl -s localhost:9876 -d '{"cmd":"start_run","character":"<CHARACTER>","seed":"'$(python3 -c "import uuid; print(uuid.uuid4().hex[:12])")'"}'
+curl -s localhost:$STS2_PORT -d '{"cmd":"start_run","character":"<CHARACTER>","seed":"'$(python3 -c "import uuid; print(uuid.uuid4().hex[:12])")'"}'
 ```
 
 ### Decision loop
@@ -53,8 +54,8 @@ Do NOT dump full JSON. Do NOT explain known card effects. Just: state → decisi
 
 ### Action format
 ```bash
-curl -s localhost:9876 -d '{"cmd":"action","action":"<CMD>","args":{...}}'
-curl -s localhost:9876 -d '{"cmd":"get_map"}'
+curl -s localhost:$STS2_PORT -d '{"cmd":"action","action":"<CMD>","args":{...}}'
+curl -s localhost:$STS2_PORT -d '{"cmd":"get_map"}'
 ```
 
 ### All commands
@@ -141,5 +142,5 @@ curl -s localhost:9876 -d '{"cmd":"get_map"}'
 
 ## Cleanup
 ```bash
-lsof -ti:9876 | xargs kill 2>/dev/null
+lsof -ti:$STS2_PORT | xargs kill 2>/dev/null
 ```

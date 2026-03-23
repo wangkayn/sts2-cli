@@ -368,29 +368,33 @@ public class RunSimulator
 
         var card = hand[cardIndex];
 
-        // Determine target
+        // Determine target based on card's TargetType first
+        // Self/None/All cards: target = null (game handles internally)
+        // AnyEnemy cards: use target_index or auto-pick first alive enemy
         Creature? target = null;
-        if (args.TryGetValue("target_index", out var targetObj) && targetObj != null)
+        var cardTargetType = card.TargetType;
+        if (cardTargetType == TargetType.AnyEnemy)
         {
-            var targetIndex = Convert.ToInt32(targetObj);
-            var state = CombatManager.Instance.DebugOnlyGetState();
-            if (state != null)
+            // Use caller's target_index if provided
+            if (args.TryGetValue("target_index", out var targetObj) && targetObj != null)
             {
-                var enemies = state.Enemies.Where(e => e != null && e.IsAlive).ToList();
-                if (targetIndex >= 0 && targetIndex < enemies.Count)
-                    target = enemies[targetIndex];
+                var targetIndex = Convert.ToInt32(targetObj);
+                var state = CombatManager.Instance.DebugOnlyGetState();
+                if (state != null)
+                {
+                    var enemies = state.Enemies.Where(e => e != null && e.IsAlive).ToList();
+                    if (targetIndex >= 0 && targetIndex < enemies.Count)
+                        target = enemies[targetIndex];
+                }
             }
-        }
-        else
-        {
-            // Auto-target: if card targets single enemy, pick first alive
-            var targetType = card.TargetType;
-            if (targetType == TargetType.AnyEnemy)
+            // Fallback: auto-target first alive enemy
+            if (target == null)
             {
                 var state = CombatManager.Instance.DebugOnlyGetState();
-                target = state?.Enemies.FirstOrDefault(e => e != null && e.IsAlive);
+                target = state?.Enemies?.FirstOrDefault(e => e != null && e.IsAlive);
             }
         }
+        // All other target types (None, All, etc.) → leave target as null
 
         // Check if card can be played
         if (!card.CanPlay(out var reason, out var _))

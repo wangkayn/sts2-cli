@@ -123,7 +123,13 @@ curl -s localhost:9876 -d '{"cmd":"get_map"}'
 ## After Each Game
 
 1. **Analyze**: If loss, identify what killed you and what decisions were wrong.
-2. **Update learning files** — EN and CN are separate:
+2. **Fix bugs**: Read `agent/bug.md`. For every `[OPEN]` bug:
+   - Use the game log (`/tmp/sts2_game.jsonl`) to find the exact step where the bug occurred
+   - Use `replay --until <step-1>` to reproduce the bug state
+   - Fix in `Sts2Headless/RunSimulator.cs`, rebuild, replay to verify
+   - Update `agent/bug.md`: `[OPEN]` → `[FIXED]` with fix description
+   - If a bug can't be reproduced from the current log, note it and move on
+3. **Update learning files** — EN and CN are separate:
    - `agent/learning_<character>_en.md` — clean professional English
    - `agent/learning_<character>_cn.md` — 网络锐评风格中文 (snarky, meme-like, opinionated)
    - DEDUPLICATE — don't add what's already there

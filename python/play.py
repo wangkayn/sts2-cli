@@ -202,6 +202,12 @@ def desc(obj):
             if "starIcons" in full:
                 var = full.split(":")[0]
                 return f"[{var}]⭐"
+            # Plural: {Cards:plural:card|cards} → card/cards based on value
+            if ":plural:" in full:
+                parts = full.split(":")
+                var = parts[0]
+                plural_parts = ":".join(parts[2:]).split("|")
+                return f"[{var}:{plural_parts[0]}|{plural_parts[1] if len(plural_parts) > 1 else plural_parts[0]}]"
             # Simple var with format: {Damage:diff()} → [Damage]
             var = full.split(":")[0]
             return f"[{var}]"
@@ -260,6 +266,14 @@ def resolve_template(text, vars_dict):
         lower_vars = {k.lower(): v for k, v in vars_dict.items()}
     def replacer(m):
         key = m.group(1)
+        # Handle plural: [Cards:card|cards]
+        if ':' in key and '|' in key:
+            var_name, plural_spec = key.split(':', 1)
+            val = lower_vars.get(var_name.lower())
+            if val is not None:
+                forms = plural_spec.split('|')
+                return forms[0] if int(val) == 1 else (forms[1] if len(forms) > 1 else forms[0])
+            return f"[{key}]"
         kl = key.lower()
         val = lower_vars.get(kl)
         if val is not None:
@@ -268,7 +282,7 @@ def resolve_template(text, vars_dict):
         if kl == "energyprefix":
             return ""  # prefix only, unit already added by energyIcons handler in desc()
         return f"[{key}]"
-    return re.sub(r'\[(\w+)\]', replacer, text)
+    return re.sub(r'\[([^\]]+)\]', replacer, text)
 
 def card_desc(card):
     """Get resolved card description using stats as template vars."""
@@ -706,13 +720,8 @@ def show_event(state):
             title = loc_resolve(raw_title) if '.' in str(raw_title) or str(raw_title).isupper() else raw_title
         # Show option description with resolved template vars
         raw_desc = opt.get("description")
-        if isinstance(raw_desc, dict):
-            opt_desc = desc(raw_desc)
-        elif raw_desc:
-            opt_desc = loc_resolve(raw_desc) if '.' in str(raw_desc) or str(raw_desc).isupper() else raw_desc
-        else:
-            opt_desc = ""
-        # Resolve template vars like [MaxHp], [Gold]
+        opt_desc = desc(raw_desc) if raw_desc else ""
+        # Resolve template vars like [MaxHp], [Gold], {Cards}
         opt_vars = opt.get("vars") or {}
         if opt_vars and opt_desc:
             opt_desc = resolve_template(opt_desc, opt_vars)

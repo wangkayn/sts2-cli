@@ -235,11 +235,9 @@ def t(en, zh=None):
     """Translate UI string based on LANG setting."""
     if zh is None:
         return en
-    if LANG == "zh":
-        return zh
-    elif LANG == "en":
+    if LANG == "en":
         return en
-    return en
+    return zh
 
 RARITY_ZH = {"Common": "普通", "Uncommon": "罕见", "Rare": "稀有"}
 CARD_TYPE_ZH = {"Attack": "攻击", "Skill": "技能", "Power": "能力", "Status": "状态", "Curse": "诅咒"}
@@ -1347,8 +1345,8 @@ if __name__ == "__main__":
     parser.add_argument("--ascension", type=int, default=0,
                        choices=range(0, 11), metavar="0-10",
                        help="Ascension level (0-10)")
-    parser.add_argument("--lang", type=str, default="both",
-                       choices=["en", "zh", "both"],
+    parser.add_argument("--lang", type=str, default="zh",
+                       choices=["en", "zh"],
                        help="Display language: en, zh, or both")
     args = parser.parse_args()
 

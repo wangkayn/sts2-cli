@@ -983,7 +983,7 @@ def get_input(prompt, valid_options=None, state=None):
 
 # ─── Main game loop ───
 
-def play(character="Ironclad", seed=None, auto=False):
+def play(character="Ironclad", seed=None, auto=False, ascension=0):
     proc = subprocess.Popen(
         [DOTNET, "run", "--no-build", "--project", PROJECT],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1013,10 +1013,11 @@ def play(character="Ironclad", seed=None, auto=False):
             return
 
         print(f"\n{c('Slay the Spire 2 — Headless CLI', 'bold')}")
-        print(f"{t('Character','角色')}: {character}  {t('Seed','种子')}: {seed or t('random','随机')}")
+        asc_str = f"  {t('Ascension','渐进难度')}: {ascension}" if ascension > 0 else ""
+        print(f"{t('Character','角色')}: {character}  {t('Seed','种子')}: {seed or t('random','随机')}{asc_str}")
         print(f"{t('Type','输入')} {c('help', 'cyan')} {t('for available commands.','查看可用命令。')}\n")
 
-        state = send({"cmd": "start_run", "character": character, "seed": seed or f"cli_{random.randint(1000,9999)}"})
+        state = send({"cmd": "start_run", "character": character, "seed": seed or f"cli_{random.randint(1000,9999)}", "ascension": ascension})
 
         while True:
             if not state:
@@ -1332,6 +1333,9 @@ if __name__ == "__main__":
     parser.add_argument("--character", type=str, default="Ironclad",
                        choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
                        help="Character to play")
+    parser.add_argument("--ascension", type=int, default=0,
+                       choices=range(0, 11), metavar="0-10",
+                       help="Ascension level (0-10)")
     parser.add_argument("--lang", type=str, default="both",
                        choices=["en", "zh", "both"],
                        help="Display language: en, zh, or both")
@@ -1341,4 +1345,4 @@ if __name__ == "__main__":
     _self.LANG = args.lang
 
     ensure_setup()
-    play(character=args.character, seed=args.seed, auto=args.auto)
+    play(character=args.character, seed=args.seed, auto=args.auto, ascension=args.ascension)

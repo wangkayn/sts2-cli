@@ -8,6 +8,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from typing import Optional
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(ROOT, "logs")
@@ -75,6 +76,26 @@ class GameLogger:
             "ts": datetime.now().isoformat(),
             "type": "action",
             "data": action,
+        }
+        self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._file.flush()
+
+    def log_llm(self, prompt: str, reasoning: Optional[str], response: str,
+                actions: list, elapsed: float, tokens_in: int, tokens_out: int):
+        """Log a full LLM call: prompt, chain-of-thought reasoning, raw response, parsed actions."""
+        if not self.enabled or not self._file:
+            return
+        entry = {
+            "step": self._step,
+            "ts": datetime.now().isoformat(),
+            "type": "llm",
+            "elapsed_s": round(elapsed, 2),
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "prompt": prompt,
+            "reasoning": reasoning,  # deepseek-reasoner chain-of-thought (None for other models)
+            "response": response,
+            "actions": actions,
         }
         self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
         self._file.flush()

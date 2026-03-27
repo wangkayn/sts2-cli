@@ -15,6 +15,7 @@ import random
 import os
 import urllib.request
 import urllib.error
+import concurrent.futures
 from game_log import GameLogger
 
 def _find_dotnet():
@@ -38,7 +39,7 @@ PROJECT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LLM_PROVIDERS = {
     "deepseek": {
         "url": "https://api.deepseek.com/v1/chat/completions",
-        "model": "deepseek-chat",
+        "model": "deepseek-reasoner",  # chain-of-thought model; reasoning_content logged
         "env_key": "DEEPSEEK_API_KEY",
     },
     "openai": {
@@ -191,20 +192,27 @@ def _format_state_for_llm(state: dict) -> str:
     return "\n".join(lines)
 
 
-def call_llm(state: dict, api_key: str, provider: str = "deepseek") -> list[dict]:
-    """Call an OpenAI-compatible LLM and return a list of game actions."""
+def call_llm(state: dict, api_key: str, provider: str = "deepseek", logger=None) -> list[dict]:
+    """Call an OpenAI-compatible LLM and return a list of game actions.
+
+    Logs the full prompt, chain-of-thought reasoning (deepseek-reasoner),
+    raw response, and parsed actions to the game logger if provided.
+    """
     import time
     cfg = LLM_PROVIDERS.get(provider, LLM_PROVIDERS["deepseek"])
     state_text = _format_state_for_llm(state)
     t0 = time.monotonic()
 
+    # deepseek-reasoner uses tokens for both chain-of-thought and final answer;
+    # use a larger budget so the answer isn't cut off after the reasoning phase.
+    is_reasoner = "reasoner" in cfg["model"]
     payload = json.dumps({
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": LLM_SYSTEM_PROMPT},
             {"role": "user", "content": state_text},
         ],
-        "max_tokens": 512,
+        "max_tokens": 4096 if is_reasoner else 512,
         "temperature": 0.2,
     }).encode()
 
@@ -216,18 +224,43 @@ def call_llm(state: dict, api_key: str, provider: str = "deepseek") -> list[dict
             "Authorization": f"Bearer {api_key}",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        body = json.loads(resp.read())
+    # Use a thread-based total timeout so long-running reasoner calls don't hang
+    # forever (urllib timeout= is per-socket-op, not total).
+    total_timeout = 300 if is_reasoner else 60
+    def _do_request():
+        with urllib.request.urlopen(req, timeout=total_timeout) as resp:
+            return json.loads(resp.read())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_do_request)
+        body = fut.result(timeout=total_timeout)
 
     elapsed = time.monotonic() - t0
-    raw = body["choices"][0]["message"]["content"].strip()
+    msg = body["choices"][0]["message"]
+    raw = (msg.get("content") or "").strip()
+    # deepseek-reasoner exposes chain-of-thought in reasoning_content
+    reasoning = msg.get("reasoning_content") or None
     tokens_in = body.get("usage", {}).get("prompt_tokens", 0)
     tokens_out = body.get("usage", {}).get("completion_tokens", 0)
-    print(f"  [LLM timing] {elapsed:.2f}s  in:{tokens_in} out:{tokens_out}")
+    print(f"  [LLM timing] {elapsed:.2f}s  in:{tokens_in} out:{tokens_out}"
+          + (f"  reasoning:{len(reasoning)}chars" if reasoning else ""))
+
     m = re.search(r'\[.*\]', raw, re.DOTALL)
     if not m:
         raise ValueError(f"LLM did not return JSON array:\n{raw}")
-    return json.loads(m.group())
+    actions = json.loads(m.group())
+
+    if logger:
+        logger.log_llm(
+            prompt=state_text,
+            reasoning=reasoning,
+            response=raw,
+            actions=actions,
+            elapsed=elapsed,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+
+    return actions
 
 
 def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: bool = True, llm_fn=None):
@@ -365,7 +398,7 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                         continue
 
                 try:
-                    actions = llm_fn(state)
+                    actions = llm_fn(state, logger)
                     if verbose:
                         print(f"  [LLM] {json.dumps(actions)[:300]}")
 
@@ -582,7 +615,7 @@ def main():
         if not api_key:
             print(f"Set --api-key or {cfg['env_key']} env var")
             sys.exit(1)
-        llm_fn = lambda state, _ak=api_key, _p=provider: call_llm(state, _ak, _p)
+        llm_fn = lambda state, logger, _ak=api_key, _p=provider: call_llm(state, _ak, _p, logger=logger)
         print(f"LLM mode: {provider} ({cfg['model']})")
 
     print(f"Playing {num_runs} runs as {character}")

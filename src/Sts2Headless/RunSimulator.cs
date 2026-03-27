@@ -640,7 +640,8 @@ public class RunSimulator
         // Ensure no actions are still running before ending turn
         WaitForActionExecutor();
 
-        Log($"Ending turn (round={CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0})");
+        var roundBefore = CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0;
+        Log($"Ending turn (round={roundBefore})");
         _turnStarted.Reset();
         _combatEnded.Reset();
 
@@ -764,7 +765,37 @@ public class RunSimulator
                     if (CombatManager.Instance.IsPlayPhase)
                         Log("Nuclear fallback SUCCEEDED — play phase resumed");
                     else
-                        Log("Nuclear fallback FAILED — returning stuck state");
+                    {
+                        Log("Nuclear fallback FAILED — forcing game_over to escape deadlock");
+                        var deadlockResult = new Dictionary<string, object?>
+                        {
+                            ["type"] = "decision",
+                            ["decision"] = "game_over",
+                            ["victory"] = false,
+                            ["message"] = "Combat deadlock: end_turn failed after all retries",
+                        };
+                        try
+                        {
+                            var rs = _runState;
+                            var p = rs?.Players?[0];
+                            if (p != null)
+                                deadlockResult["player"] = new Dictionary<string, object?>
+                                {
+                                    ["hp"] = p.Creature?.CurrentHp ?? 0,
+                                    ["max_hp"] = p.Creature?.MaxHp ?? 0,
+                                    ["gold"] = p.Gold,
+                                    ["deck_size"] = p.Deck?.Cards?.Count(c => c != null) ?? 0,
+                                };
+                            if (rs != null)
+                                deadlockResult["context"] = new Dictionary<string, object?>
+                                {
+                                    ["act"] = rs.CurrentActIndex + 1,
+                                    ["floor"] = rs.ActFloor,
+                                };
+                        }
+                        catch { }
+                        return deadlockResult;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1324,19 +1355,22 @@ public class RunSimulator
             var rewardCards = _cardSelector.PendingRewardCards!;
             var cards = rewardCards.Select((cr, i) =>
             {
+                var c = cr.Card;
                 var stats = new Dictionary<string, object?>();
-                try { foreach (var dv in cr.Card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                var kws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
-                    ["id"] = cr.Card.Id.ToString(),
-                    ["name"] = _loc.Card(cr.Card.Id.Entry),
-                    ["cost"] = cr.Card.EnergyCost?.GetResolved() ?? 0,
-                    ["type"] = cr.Card.Type.ToString(),
-                    ["rarity"] = cr.Card.Rarity.ToString(),
-                    ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
+                    ["id"] = c.Id.ToString(),
+                    ["name"] = _loc.Card(c.Id.Entry),
+                    ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                    ["type"] = c.Type.ToString(),
+                    ["rarity"] = c.Rarity.ToString(),
+                    ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
-                    ["after_upgrade"] = GetUpgradedInfo(cr.Card),
+                    ["keywords"] = kws?.Count > 0 ? kws : null,
+                    ["after_upgrade"] = GetUpgradedInfo(c),
                 };
             }).ToList();
 
@@ -1360,6 +1394,7 @@ public class RunSimulator
             {
                 var stats = new Dictionary<string, object?>();
                 try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+                var kws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -1369,16 +1404,28 @@ public class RunSimulator
                     ["type"] = card.Type.ToString(),
                     ["upgraded"] = card.IsUpgraded,
                     ["stats"] = stats.Count > 0 ? stats : null,
+                    ["keywords"] = kws?.Count > 0 ? kws : null,
                     ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                     ["after_upgrade"] = GetUpgradedInfo(card),
                 };
             }).ToList();
+
+            // Infer purpose from current room type
+            var selectPurpose = _runState?.CurrentRoom switch
+            {
+                MerchantRoom => "remove_card",
+                RestSiteRoom => "upgrade_card",
+                EventRoom    => "event_card",
+                CombatRoom   => "combat_card",
+                _            => "select_card",
+            };
 
             return new Dictionary<string, object?>
             {
                 ["type"] = "decision",
                 ["decision"] = "card_select",
                 ["context"] = RunContext(),
+                ["purpose"] = selectPurpose,
                 ["cards"] = opts,
                 ["min_select"] = _cardSelector.PendingMinSelect,
                 ["max_select"] = _cardSelector.PendingMaxSelect,
@@ -1474,6 +1521,25 @@ public class RunSimulator
         };
     }
 
+    /// <summary>Build a map choice dict with one level of path lookahead.</summary>
+    private static Dictionary<string, object?> MapChoiceDict(MapPoint node)
+    {
+        var d = new Dictionary<string, object?>
+        {
+            ["col"]  = (int)node.coord.col,
+            ["row"]  = (int)node.coord.row,
+            ["type"] = node.PointType.ToString(),
+        };
+        var next = node.Children?.Select(c => new Dictionary<string, object?>
+        {
+            ["col"]  = (int)c.coord.col,
+            ["row"]  = (int)c.coord.row,
+            ["type"] = c.PointType.ToString(),
+        }).ToList();
+        if (next?.Count > 0) d["next"] = next;
+        return d;
+    }
+
     private Dictionary<string, object?> MapSelectState()
     {
         var map = _runState?.Map;
@@ -1508,25 +1574,13 @@ public class RunSimulator
                 if (sp?.Children != null)
                 {
                     foreach (var child in sp.Children)
-                    {
-                        choices.Add(new Dictionary<string, object?>
-                        {
-                            ["col"] = (int)child.coord.col,
-                            ["row"] = (int)child.coord.row,
-                            ["type"] = child.PointType.ToString(),
-                        });
-                    }
+                        choices.Add(MapChoiceDict(child));
                 }
             }
             else
             {
                 choices = (currentPoint.Children ?? Enumerable.Empty<MapPoint>())
-                    .Select(child => new Dictionary<string, object?>
-                    {
-                        ["col"] = (int)child.coord.col,
-                        ["row"] = (int)child.coord.row,
-                        ["type"] = child.PointType.ToString(),
-                    })
+                    .Select(child => MapChoiceDict(child))
                     .ToList();
             }
         }
@@ -1547,14 +1601,7 @@ public class RunSimulator
             if (startPoint.Children != null)
             {
                 foreach (var child in startPoint.Children)
-                {
-                    choices.Add(new Dictionary<string, object?>
-                    {
-                        ["col"] = (int)child.coord.col,
-                        ["row"] = (int)child.coord.row,
-                        ["type"] = child.PointType.ToString(),
-                    });
-                }
+                    choices.Add(MapChoiceDict(child));
             }
         }
 
@@ -2025,12 +2072,16 @@ public class RunSimulator
         if (eventName == eventEntry + ".title")
             eventName = _loc.Event(eventEntry);
 
-        // Resolve event description, suppress if key not found
-        string? eventDesc = null;
+        // Resolve event description; suppress if localization not found (key returned unchanged)
+        object? eventDesc = null;
         if (localEvent.Description != null)
         {
             var d = _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
-            if (d != localEvent.Description.LocEntryKey)
+            var ds = d?.ToString();
+            // Accept if non-empty and doesn't look like an unresolved localization key
+            if (!string.IsNullOrWhiteSpace(ds)
+                && ds != localEvent.Description.LocEntryKey
+                && !ds.EndsWith(".description", StringComparison.OrdinalIgnoreCase))
                 eventDesc = d;
         }
 
@@ -2059,12 +2110,39 @@ public class RunSimulator
             return MapSelectState();
         }
 
-        var optionList = options.Select((opt, i) => new Dictionary<string, object?>
+        var maxHp = player.Creature?.MaxHp ?? 80;
+        var optionList = options.Select((opt, i) =>
         {
-            ["index"] = i,
-            ["option_id"] = opt.OptionId,
-            ["name"] = opt.GetType().Name,
-            ["is_enabled"] = opt.IsEnabled,
+            // Resolve localized name from opt.Title; fall back to option_id
+            object? name = opt.OptionId;
+            if (opt.Title != null)
+            {
+                var n = _loc.Bilingual(opt.Title.LocTable, opt.Title.LocEntryKey);
+                if (n?.ToString() != opt.Title.LocEntryKey) name = n;
+            }
+
+            // Resolve localized description from opt.Description
+            object? desc = null;
+            if (opt.Description != null)
+            {
+                var d = _loc.Bilingual(opt.Description.LocTable, opt.Description.LocEntryKey);
+                if (d?.ToString() != opt.Description.LocEntryKey) desc = d;
+            }
+
+            var entry = new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["option_id"] = opt.OptionId,
+                ["name"] = name,
+                ["description"] = desc,
+                ["is_enabled"] = opt.IsEnabled,
+            };
+
+            // For HEAL option, add concrete heal amount (30% max HP, min 1)
+            if (opt.OptionId == "HEAL")
+                entry["heal_amount"] = Math.Max(1, (int)Math.Round(maxHp * 0.3));
+
+            return entry;
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -2418,6 +2496,14 @@ public class RunSimulator
         // because there's no Godot scene tree, causing the ActionExecutor to deadlock.
         PatchCmdWait();
 
+        // Patch PlayerHurtVignetteHelper.Play() to be a no-op in headless mode.
+        // This static method triggers NLowHpBorderVfx.Create() which tries to instantiate
+        // a Godot scene from an internal VFX resource cache (not ResourceLoader). In headless
+        // mode the cache is empty, so Create() throws NullReferenceException, which faults
+        // the async enemy-turn Task and corrupts the ActionExecutor — causing end_turn to
+        // deadlock forever returning the same state (hand=0, draw=N, discard=M).
+        PatchPlayerHurtVfx();
+
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
 
@@ -2534,6 +2620,33 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch Cmd.Wait: {ex.Message}");
+        }
+    }
+
+    private static void PatchPlayerHurtVfx()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.vfxpatch");
+            var vfxType = typeof(MegaCrit.Sts2.Core.Nodes.Vfx.PlayerHurtVignetteHelper);
+            var playMethod = vfxType.GetMethod("Play",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static);
+            var prefix = typeof(VfxPatches).GetMethod(nameof(VfxPatches.PlayerHurtVfxNoOp),
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (playMethod != null && prefix != null)
+            {
+                harmony.Patch(playMethod, new HarmonyMethod(prefix));
+                Console.Error.WriteLine("[INFO] Patched PlayerHurtVignetteHelper.Play() to no-op (prevents NLowHpBorderVfx NullRef deadlock)");
+            }
+            else
+            {
+                Console.Error.WriteLine("[WARN] PlayerHurtVignetteHelper.Play() not found — skipping patch");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch PlayerHurtVignetteHelper.Play: {ex.Message}");
         }
     }
 
@@ -2677,6 +2790,15 @@ public class RunSimulator
             _rewardChoice = -1;
             _rewardWait?.Set();
         }
+    }
+
+    internal static class VfxPatches
+    {
+        /// <summary>Harmony prefix: suppress PlayerHurtVignetteHelper.Play() entirely in headless mode.
+        /// Without this, the method calls NLowHpBorderVfx.Create() which throws NullReferenceException
+        /// (no Godot scene tree / resource cache), faulting the async enemy-turn Task and deadlocking
+        /// end_turn.</summary>
+        public static bool PlayerHurtVfxNoOp() => false; // skip original
     }
 
     internal static class YieldPatches

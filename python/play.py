@@ -541,7 +541,19 @@ def show_map(state, send_fn=None):
     for i, ch in enumerate(choices):
         icon = type_icons.get(ch["type"], "?")
         ntype = t(ch["type"], NODE_TYPE_ZH.get(ch["type"], ch["type"]))
-        print(f"  [{i}] {icon} {ntype}")
+        # Show one level of lookahead if available
+        next_nodes = ch.get("next", [])
+        if next_nodes:
+            next_parts = []
+            for nx in next_nodes:
+                nx_type = nx.get("type", "?")
+                nx_icon = type_icons.get(nx_type, "?")
+                nx_label = NODE_TYPE_ZH.get(nx_type, nx_type)
+                next_parts.append(f"{nx_icon}{nx_label}")
+            lookahead = c(f" → {', '.join(next_parts)}", "dim")
+        else:
+            lookahead = ""
+        print(f"  [{i}] {icon} {ntype}{lookahead}")
 
 def _format_upgrade_preview(stats, aug, current_cost=None):
     """Format upgrade preview string."""
@@ -663,9 +675,29 @@ def show_rest_site(state):
         enabled = opt.get("is_enabled", True)
         mark = c("●", "green") if enabled else c("○", "dim")
         opt_id = opt.get("option_id", "?")
-        opt_name = t(opt_id, REST_OPTIONS_ZH.get(opt_id, opt_id))
-        opt_desc = opt.get("name", "")
-        print(f"  {mark} [{opt['index']}] {opt_name}" + (f" — {opt_desc}" if opt_desc and opt_desc != opt_id else ""))
+        # Prefer localized name from C# serializer; fall back to REST_OPTIONS_ZH lookup
+        raw_name = opt.get("name")
+        if raw_name and isinstance(raw_name, dict):
+            opt_name = raw_name.get("zh") or raw_name.get("en") or REST_OPTIONS_ZH.get(opt_id, opt_id)
+        elif raw_name and raw_name != opt_id:
+            opt_name = raw_name
+        else:
+            opt_name = REST_OPTIONS_ZH.get(opt_id, opt_id)
+        # Description
+        raw_desc = opt.get("description")
+        opt_desc = None
+        if raw_desc and isinstance(raw_desc, dict):
+            opt_desc = raw_desc.get("zh") or raw_desc.get("en")
+        elif raw_desc and raw_desc != opt_id:
+            opt_desc = raw_desc
+        # Heal amount annotation
+        heal_amount = opt.get("heal_amount")
+        suffix = ""
+        if heal_amount:
+            suffix += f" (+{heal_amount} HP)"
+        if opt_desc:
+            suffix += f" — {c(opt_desc, 'dim')}"
+        print(f"  {mark} [{opt['index']}] {opt_name}{suffix}")
 
 def _load_loc():
     """Load localization data for resolving event option names."""
@@ -1235,7 +1267,16 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True):
                     print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
-                print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} ({t('select','选择')} {min_sel}-{max_sel})")
+                purpose = state.get("purpose", "")
+                PURPOSE_ZH = {
+                    "remove_card": "移除卡牌",
+                    "upgrade_card": "升级卡牌",
+                    "event_card": "事件选牌",
+                    "combat_card": "战斗选牌",
+                    "select_card": "选择卡牌",
+                }
+                purpose_label = t(purpose, PURPOSE_ZH.get(purpose, purpose)) if purpose else t("Choose cards", "选择卡牌")
+                print(f"  {c(purpose_label, 'bold')} ({t('select','选择')} {min_sel}-{max_sel})")
                 show_player(state.get("player", {}))
                 print()
                 cards = state.get("cards", [])

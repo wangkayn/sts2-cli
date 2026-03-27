@@ -178,7 +178,14 @@ public static class ProjectSettings
 public static class ResourceLoader
 {
     public enum CacheMode { Reuse, Replace, Ignore }
-    public static T? Load<T>(string path, string? typeHint = null, CacheMode cacheMode = CacheMode.Reuse) where T : class => null;
+    public static T? Load<T>(string path, string? typeHint = null, CacheMode cacheMode = CacheMode.Reuse) where T : class
+    {
+        // Return a stub PackedScene so that Instantiate<T>() succeeds instead of throwing
+        // NullReferenceException in VFX/UI code paths (e.g. NLowHpBorderVfx.Create()).
+        if (typeof(T) == typeof(PackedScene))
+            return new PackedScene() as T;
+        return null;
+    }
     public static bool Exists(string path) => false;
     public static bool Exists(string path, string typeHint) => false;
 }
